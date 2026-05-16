@@ -1,0 +1,24 @@
+# Generated user settings
+config.json
+
+# Plugin toggle state
+.toggle-*
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Generated voice blend files (user-created, not distributable)
+voices/*.pt
+
+# Preserve directory marker
+!voices/.gitkeep
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
