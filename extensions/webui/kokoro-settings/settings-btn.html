@@ -1,0 +1,41 @@
+<html>
+<head>
+</head>
+<body>
+  <div x-data>
+    <template x-if="$store.settings?.settings && $store.pluginSettingsPrototype">
+      <button class="kokoro-settings-btn"
+              @click="$store.pluginSettingsPrototype.openConfig('kokoro')"
+              title="Kokoro Voice Settings">
+        <span class="material-symbols-outlined">tune</span>
+      </button>
+    </template>
+  </div>
+
+  <style>
+    .kokoro-settings-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2rem;
+      height: 2rem;
+      padding: 0;
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--color-text-secondary);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      margin-right: 0.5rem;
+    }
+    .kokoro-settings-btn:hover {
+      background: color-mix(in srgb, var(--color-highlight) 12%, transparent);
+      color: var(--color-text-primary);
+      border-color: var(--color-highlight);
+    }
+    .kokoro-settings-btn .material-symbols-outlined {
+      font-size: 1.1rem;
+    }
+  </style>
+</body>
+</html>
