@@ -1,0 +1,1 @@
+# Kokoro TTS Plugin\n# Provides full control over Kokoro text-to-speech settings
