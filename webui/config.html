@@ -1,0 +1,521 @@
+<html>
+<head>
+    <title>Kokoro Settings</title>
+</head>
+<body>
+    <div x-data="{
+        // === BLEND EDITOR STATE ===
+        blendVoices: [],
+        rawWeights: {},
+        blendCreating: false,
+        blendResult: '',
+        blendError: '',
+
+        // === ACTIVE VOICE STATE ===
+        activeVoice: '',
+        activeVoiceOk: false,
+        liveVoice: '',
+        statusMsg: '',
+        statusError: '',
+
+        // === CACHED BLENDS ===
+        cachedBlends: [],
+
+        // === CONFIG ===
+        speed: 1.3,
+        langCode: 'a',
+
+        allVoices: [
+            {id: 'af_bella', label: 'Bella', group: 'American Female'},
+            {id: 'af_nicole', label: 'Nicole', group: 'American Female'},
+            {id: 'af_sarah', label: 'Sarah', group: 'American Female'},
+            {id: 'af_sky', label: 'Sky', group: 'American Female'},
+            {id: 'am_adam', label: 'Adam', group: 'American Male'},
+            {id: 'am_michael', label: 'Michael', group: 'American Male'},
+            {id: 'bf_emma', label: 'Emma', group: 'British Female'},
+            {id: 'bf_isabella', label: 'Isabella', group: 'British Female'},
+            {id: 'bm_george', label: 'George', group: 'British Male'},
+            {id: 'bm_lewis', label: 'Lewis', group: 'British Male'}
+        ],
+        langCodes: [
+            {id: 'a', label: 'American English'},
+            {id: 'b', label: 'British English'},
+            {id: 'e', label: 'Spanish'},
+            {id: 'f', label: 'French'},
+            {id: 'h', label: 'Hindi'},
+            {id: 'i', label: 'Italian'},
+            {id: 'j', label: 'Japanese'},
+            {id: 'p', label: 'Brazilian Portuguese'},
+            {id: 'z', label: 'Mandarin Chinese'}
+        ],
+
+        // === WEIGHT HELPERS ===
+        getWeight(id) {
+            this.rawWeights[id] = this.rawWeights[id] ?? 1;
+            return this.rawWeights[id];
+        },
+        setWeight(id, val) {
+            this.rawWeights[id] = Number(val);
+        },
+        totalRawWeight() {
+            return this.blendVoices.reduce((sum, id) => sum + this.getWeight(id), 0) || 1;
+        },
+        normalizedPercent(id) {
+            return Math.round((this.getWeight(id) / this.totalRawWeight()) * 100);
+        },
+        getAvailableVoices() {
+            const used = new Set(this.blendVoices);
+            return this.allVoices.filter(v => !used.has(v.id));
+        },
+        removeBlendVoice(voiceId) {
+            if (this.blendVoices.length <= 1) return;
+            delete this.rawWeights[voiceId];
+            this.blendVoices = this.blendVoices.filter(v => v !== voiceId);
+        },
+        addBlendVoice(id) {
+            if (!id || this.blendVoices.includes(id)) return;
+            this.blendVoices = [...this.blendVoices, id];
+            this.rawWeights[id] = 1;
+        },
+
+        // === CREATE BLEND ===
+        async createBlend() {
+            this.blendCreating = true;
+            this.blendError = '';
+            this.blendResult = '';
+            try {
+                const ids = this.blendVoices;
+                const total = this.totalRawWeight();
+                const weights = ids.map(id => ({ id, weight: this.getWeight(id) / total }));
+                const resp = await globalThis.fetchApi('/api/plugins/kokoro/kokoro_api', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ action: 'create_blend', voices: weights })
+                });
+                const result = await resp.json();
+                if (result.success) {
+                    this.blendResult = result.cached ? 'Blend already cached' : 'Blend created!';
+                    // Auto-activate the new blend
+                    await this.setActiveVoice(result.blend_file);
+                    await this.loadStatus();
+                } else {
+                    this.blendError = result.error || 'Failed to create blend';
+                }
+            } catch (e) {
+                this.blendError = 'Error: ' + e.message;
+            } finally {
+                this.blendCreating = false;
+            }
+        },
+
+        // === SET ACTIVE VOICE (API call) ===
+        async setActiveVoice(voice) {
+            this.statusError = '';
+            try {
+                const resp = await globalThis.fetchApi('/api/plugins/kokoro/kokoro_api', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ action: 'set_active_voice', voice: voice })
+                });
+                const result = await resp.json();
+                if (result.success) {
+                    this.activeVoice = voice;
+                    this.activeVoiceOk = true;
+                    this.statusMsg = 'Active voice set: ' + voice.split('/').pop();
+                    // Also update Agent Zero config
+                    if (typeof config !== 'undefined' && config !== null) {
+                        try { config.voice = voice; } catch(e) {}
+                    }
+                } else {
+                    this.statusError = result.error || 'Failed to set voice';
+                }
+            } catch (e) {
+                this.statusError = 'Error: ' + e.message;
+            }
+        },
+
+        // === DELETE BLEND ===
+        async deleteBlend(blend) {
+            try {
+                const resp = await globalThis.fetchApi('/api/plugins/kokoro/kokoro_api', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ action: 'delete_blend', filename: blend })
+                });
+                const result = await resp.json();
+                if (result.success) {
+                    this.cachedBlends = this.cachedBlends.filter(b => b !== blend);
+                    // If deleted blend was active, clear it
+                    if (this.activeVoice === blend) {
+                        this.activeVoice = '';
+                        this.activeVoiceOk = false;
+                        this.statusMsg = 'Active blend was deleted. Select a new voice.';
+                        if (typeof config !== 'undefined' && config !== null) {
+                            try { config.voice = ''; } catch(e) {}
+                        }
+                    }
+                } else {
+                    this.statusError = result.error || 'Delete failed';
+                }
+            } catch (e) {
+                this.statusError = 'Error: ' + e.message;
+            }
+        },
+
+        // === LOAD STATUS ===
+        async loadStatus() {
+            try {
+                const resp = await globalThis.fetchApi('/api/plugins/kokoro/kokoro_api', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ action: 'get_status' })
+                });
+                const result = await resp.json();
+                this.activeVoice = result.config_voice || '';
+                this.activeVoiceOk = result.voice_ok || false;
+                this.liveVoice = result.live_voice || '';
+                this.speed = result.speed || 1.3;
+                this.langCode = result.lang_code || 'a';
+                this.cachedBlends = result.blends || [];
+                if (!this.activeVoiceOk && this.activeVoice) {
+                    this.statusError = 'Configured voice file not found!';
+                } else if (this.activeVoice) {
+                    this.statusMsg = 'Using: ' + this.activeVoice.split('/').pop();
+                } else {
+                    this.statusMsg = 'No voice configured. Create a blend or select one below.';
+                }
+            } catch (e) {
+                this.statusError = 'Status error: ' + e.message;
+            }
+        },
+
+        // === SAVE SPEED/LANG ===
+        async saveConfig() {
+            if (typeof config !== 'undefined' && config !== null) {
+                try {
+                    config.speed = this.speed;
+                    config.lang_code = this.langCode;
+                } catch(e) {}
+            }
+        },
+
+        // === INIT ===
+        async init() {
+            // Load current status from API
+            await this.loadStatus();
+            // Default blend editor to 2 voices if no active blend
+            if (this.blendVoices.length === 0) {
+                this.blendVoices = ['af_nicole', 'bf_emma'];
+                this.rawWeights = {'af_nicole': 1, 'bf_emma': 1};
+            }
+        }
+    }" x-init="init()">
+
+    <!-- STATUS BAR -->
+    <div class="field">
+        <div class="field-label">
+            <div class="field-title">🎤 Active Voice</div>
+            <div class="field-description">Current voice used for speech synthesis</div>
+        </div>
+        <div class="field-control">
+            <div class="kokoro-status-bar" :class="{'kokoro-status-ok': activeVoiceOk, 'kokoro-status-warn': !activeVoiceOk && activeVoice, 'kokoro-status-empty': !activeVoice}">
+                <span x-show="activeVoiceOk" style="color: #2e7d32;">✓</span>
+                <span x-show="!activeVoiceOk && activeVoice" style="color: #c62828;">⚠</span>
+                <span x-show="!activeVoice" style="color: #9ca3af;">○</span>
+                <span x-text="activeVoice ? activeVoice.split('/').pop() : 'No voice selected'"></span>
+            </div>
+            <span x-show="statusMsg" style="color: #2e7d32; font-size: 0.8rem; margin-top: 0.25rem; display: block;" x-text="statusMsg"></span>
+            <span x-show="statusError" style="color: #c62828; font-size: 0.8rem; margin-top: 0.25rem; display: block;" x-text="statusError"></span>
+            <button class="btn btn-secondary" style="margin-top: 0.25rem;" @click="loadStatus()">Refresh status</button>
+        </div>
+    </div>
+
+    <!-- BLEND CREATOR -->
+    <div class="field">
+        <div class="field-label">
+            <div class="field-title">Blend Creator</div>
+            <div class="field-description">Mix voices with weights to create a custom blend</div>
+        </div>
+        <div class="field-control kokoro-voice-list">
+            <template x-for="(vid, idx) in blendVoices" :key="vid">
+                <div class="kokoro-voice-row">
+                    <span class="kokoro-voice-name" x-text="allVoices.find(v => v.id === vid)?.label || vid"></span>
+                    <div x-show="blendVoices.length > 1" class="kokoro-weight-group">
+                        <input type="range" min="0" max="10" step="1"
+                               :value="getWeight(vid)"
+                               @input="setWeight(vid, $event.target.value)"
+                               class="kokoro-weight-slider" />
+                        <span class="kokoro-weight-pct" x-text="normalizedPercent(vid) + '%'"></span>
+                    </div>
+                    <button type="button" class="kokoro-voice-remove"
+                            x-on:click="removeBlendVoice(vid)"
+                            title="Remove"
+                            :disabled="blendVoices.length <= 1">
+                        <span class="material-symbols-outlined">close</span>
+                    </button>
+                </div>
+            </template>
+            <template x-if="getAvailableVoices().length > 0">
+                <div class="kokoro-voice-add">
+                    <select @change="addBlendVoice($event.target.value); $event.target.value = ''" class="kokoro-voice-select">
+                        <option value="">+ Add a voice...</option>
+                        <template x-for="group in ['American Female', 'American Male', 'British Female', 'British Male']" :key="group">
+                            <optgroup :label="group">
+                                <template x-for="voice in getAvailableVoices().filter(v => v.group === group)" :key="voice.id">
+                                    <option :value="voice.id" x-text="voice.label"></option>
+                                </template>
+                            </optgroup>
+                        </template>
+                    </select>
+                </div>
+            </template>
+            <button class="btn btn-primary" style="margin-top: 0.5rem;" @click="createBlend()" :disabled="blendCreating || blendVoices.length === 0">
+                <span x-show="!blendCreating">Create blend &amp; activate</span>
+                <span x-show="blendCreating">Creating...</span>
+            </button>
+            <span x-show="blendResult" style="color: #2e7d32; margin-left: 0.5rem; font-size: 0.85rem;" x-text="blendResult"></span>
+            <span x-show="blendError" style="color: #c62828; margin-left: 0.5rem; font-size: 0.85rem;" x-text="blendError"></span>
+        </div>
+    </div>
+
+    <!-- CACHED BLENDS -->
+    <div class="field" x-show="cachedBlends.length > 0">
+        <div class="field-label">
+            <div class="field-title">Saved Blends</div>
+            <div class="field-description">Click Use to activate, ✕ to delete</div>
+        </div>
+        <div class="field-control">
+            <div style="display: flex; gap: 0.375rem; flex-wrap: wrap;">
+                <template x-for="blend in cachedBlends" :key="blend">
+                    <span class="kokoro-blend-tag" :class="{'kokoro-blend-active': activeVoice === blend}">
+                        <span x-text="blend.split('/').pop()" style="max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></span>
+                        <button type="button" class="kokoro-blend-use" @click="setActiveVoice(blend)" title="Use this blend">Use</button>
+                        <button type="button" class="kokoro-blend-del" @click="deleteBlend(blend)" title="Delete">✕</button>
+                    </span>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <!-- SPEED -->
+    <div class="field">
+        <div class="field-label">
+            <div class="field-title">Speed</div>
+            <div class="field-description">Speech rate from 0.5x (slow) to 3.0x (fast)</div>
+        </div>
+        <div class="field-control kokoro-speed-control">
+            <span class="kokoro-speed-label">Speed</span>
+            <input type="range" min="0.5" max="3.0" step="0.1" x-model.number="speed" @change="saveConfig()" />
+            <span class="range-value" x-text="(speed || 1.3).toFixed(1) + 'x'"></span>
+        </div>
+    </div>
+
+    <!-- LANGUAGE -->
+    <div class="field">
+        <div class="field-label">
+            <div class="field-title">Language</div>
+            <div class="field-description">Language code affects pronunciation</div>
+        </div>
+        <div class="field-control">
+            <select x-model="langCode" @change="saveConfig()">
+                <template x-for="lang in langCodes" :key="lang.id">
+                    <option :value="lang.id" x-text="lang.label"></option>
+                </template>
+            </select>
+        </div>
+    </div>
+
+    <style>
+        .kokoro-status-bar {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.4rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            max-width: 100%;
+            overflow: hidden;
+        }
+        .kokoro-status-ok { background: #e8f5e9; border: 1px solid #4caf50; }
+        .kokoro-status-warn { background: #fff3e0; border: 1px solid #ff9800; }
+        .kokoro-status-empty { background: #f5f5f5; border: 1px solid #bdbdbd; }
+        .kokoro-voice-list { display: flex; flex-direction: column; gap: 0.375rem; }
+        .kokoro-voice-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.3rem 0.5rem;
+            background: var(--color-panel, #fff);
+            border: 1px solid var(--color-border, #e5e7eb);
+            border-radius: 6px;
+            min-height: 34px;
+            box-sizing: border-box;
+        }
+        .kokoro-voice-row:hover { background: var(--color-highlight, #f3f4f6); }
+        .kokoro-voice-name {
+            flex-shrink: 0;
+            font-weight: 500;
+            font-size: 0.85rem;
+            color: var(--color-text);
+            min-width: 60px;
+        }
+        .kokoro-weight-group {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+        .kokoro-weight-slider {
+            -webkit-appearance: none;
+            appearance: none;
+            flex: 1 1 auto;
+            min-width: 60px;
+            height: 6px;
+            background: #cbd5e1;
+            border-radius: 3px;
+            outline: none;
+            cursor: pointer;
+        }
+        .kokoro-weight-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            background: #3b82f6;
+            border: 2px solid #fff;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+            cursor: pointer;
+        }
+        .kokoro-weight-slider::-moz-range-thumb {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            background: #3b82f6;
+            border: 2px solid #fff;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+            cursor: pointer;
+        }
+        .kokoro-weight-pct {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--color-text, #111827);
+            min-width: 2.5rem;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+        .kokoro-voice-remove {
+            flex-shrink: 0;
+            width: 26px; height: 26px;
+            min-width: 26px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            color: var(--color-text-secondary, #9ca3af);
+            cursor: pointer;
+            transition: all 0.15s;
+            padding: 0; margin: 0;
+        }
+        .kokoro-voice-remove:hover {
+            background: #fee2e2;
+            color: #ef4444;
+            border-color: #ef4444;
+        }
+        .kokoro-voice-remove:disabled { opacity: 0.3; cursor: default; }
+        .kokoro-voice-remove .material-symbols-outlined { font-size: 1rem; line-height: 1; }
+        .kokoro-voice-add { margin-top: 0.25rem; }
+        .kokoro-voice-select {
+            width: 100%; height: 28px;
+            padding: 0 8px;
+            background: var(--color-background, #fff);
+            border: 1px solid var(--color-border, #d1d5db);
+            border-radius: 4px;
+            color: var(--color-text);
+            box-sizing: border-box;
+            cursor: pointer;
+            font-size: 0.8rem;
+            appearance: none; -webkit-appearance: none;
+        }
+        .kokoro-voice-select:hover { border-color: var(--color-highlight, #3b82f6); }
+        .kokoro-blend-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.2rem 0.4rem;
+            background: var(--color-panel, #f3f4f6);
+            border: 1px solid var(--color-border, #e5e7eb);
+            border-radius: 4px;
+            font-size: 0.75rem;
+        }
+        .kokoro-blend-active {
+            background: #e8f5e9;
+            border-color: #4caf50;
+        }
+        .kokoro-blend-use {
+            background: none;
+            border: 1px solid #3b82f6;
+            color: #3b82f6;
+            cursor: pointer;
+            font-size: 0.7rem;
+            padding: 0.05rem 0.3rem;
+            border-radius: 3px;
+        }
+        .kokoro-blend-use:hover { background: #3b82f6; color: #fff; }
+        .kokoro-blend-del {
+            background: none;
+            border: none;
+            color: #ef4444;
+            cursor: pointer;
+            font-size: 0.7rem;
+            padding: 0;
+        }
+        .kokoro-blend-del:hover { text-decoration: underline; }
+        .kokoro-speed-control {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.5rem 0.75rem;
+            background: var(--color-panel, #fff);
+            border: 1px solid var(--color-border, #e5e7eb);
+            border-radius: 8px;
+        }
+        .kokoro-speed-label { font-weight: 600; color: var(--color-text); min-width: 3rem; }
+        .kokoro-speed-control input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            flex: 1;
+            height: 8px;
+            background: var(--color-border, #d1d5db);
+            border-radius: 4px;
+            outline: none;
+            cursor: pointer;
+        }
+        .kokoro-speed-control input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px; height: 20px;
+            border-radius: 50%;
+            background: var(--color-highlight, #2563eb);
+            cursor: pointer;
+            border: 2px solid var(--color-panel, #ffffff);
+        }
+        .kokoro-speed-control input[type="range"]::-moz-range-thumb {
+            width: 20px; height: 20px;
+            border-radius: 50%;
+            background: var(--color-highlight, #2563eb);
+            cursor: pointer;
+            border: 2px solid var(--color-panel, #ffffff);
+        }
+        .kokoro-speed-control .range-value {
+            font-weight: 600;
+            color: var(--color-text);
+            min-width: 3rem;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+    </style>
+</body>
+</html>
