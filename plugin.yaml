@@ -1,0 +1,10 @@
+name: kokoro
+title: Kokoro
+description: Full control over Kokoro text-to-speech — voice selection, speed, language, and blending.
+version: 1.0.0
+has_config_screen: true
+settings_sections:
+  - agent
+per_project_config: false
+per_agent_config: false
+always_enabled: false
