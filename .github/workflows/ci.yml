@@ -17,6 +17,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install validation dependencies
+        run: pip install pyyaml
+
       - name: Validate plugin.yaml
         run: python -c "import yaml; yaml.safe_load(open('plugin.yaml'))"
 
