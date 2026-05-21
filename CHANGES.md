@@ -1,3 +1,16 @@
+# Kokoro Plugin Changes
+
+## 1.0.1 — 2026-05-21
+
+### Fixed
+- Settings UI: select/dropdown text was invisible (white-on-white) due to inheriting theme `--color-text` CSS variable. Added explicit foreground (`#111827`) and background (`#ffffff`) colors for `.kokoro-voice-select`, `.field-control select`, `option`, and `optgroup` elements with `color-scheme: light` for native browser dropdowns.
+
+### Changed
+- Restored native browser select appearance (`appearance: auto`) for better dropdown usability.
+- Select hover states now apply to both `.kokoro-voice-select` and `.field-control select`.
+
+---
+
 # Kokoro Plugin Changes — 2026-04-28
 
 ## Problem

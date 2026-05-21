@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate plugin.yaml
+        run: python -c "import yaml; yaml.safe_load(open('plugin.yaml'))"
+
+      - name: Python syntax check
+        run: |
+          python -m py_compile api/kokoro_api.py
+          python -m py_compile hooks.py
+          python -m py_compile tests/test_kokoro_api.py
+
+      - name: Install test dependencies
+        run: pip install pytest
+
+      - name: Run tests
+        run: python -m pytest tests/test_kokoro_api.py -v
+
+      - name: Check repo structure
+        run: |
+          test -f plugin.yaml || (echo 'Missing plugin.yaml' && exit 1)
+          test -f README.md || (echo 'Missing README.md' && exit 1)
+          test -f LICENSE || (echo 'Missing LICENSE' && exit 1)
+          test -f webui/config.html || (echo 'Missing webui/config.html' && exit 1)
