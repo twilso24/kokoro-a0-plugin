@@ -3,11 +3,11 @@
 ## 1.0.1 — 2026-05-21
 
 ### Fixed
-- Settings UI: select/dropdown text was invisible (white-on-white) due to inheriting theme `--color-text` CSS variable. Added explicit foreground (`#111827`) and background (`#ffffff`) colors for `.kokoro-voice-select`, `.field-control select`, `option`, and `optgroup` elements with `color-scheme: light` for native browser dropdowns.
+- Settings UI: all text elements were invisible (white-on-white) in dark theme due to inheriting theme CSS variables (`--color-text`, `--color-panel`). Added explicit foreground (`#111827`) and background (`#ffffff`, `#f3f4f6`) colors for status bar, voice rows, voice names, weight percentages, blend tags, speed controls, range values, and select/dropdown elements with `color-scheme: light` for native browser dropdowns.
 
 ### Changed
 - Restored native browser select appearance (`appearance: auto`) for better dropdown usability.
-- Select hover states now apply to both `.kokoro-voice-select` and `.field-control select`.
+- All Kokoro UI containers now use explicit backgrounds instead of theme variables for reliable contrast.
 
 ---
 
